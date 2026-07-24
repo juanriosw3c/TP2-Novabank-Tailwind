@@ -43,8 +43,29 @@ const createUser = async ({ nombre, email, contrasena, dni }) => {
   return await findById(result.insertId);
 };
 
+const findByCbuOrAlias = async (destino) => {
+  const [rows] = await db.execute(
+    `SELECT id, nombre, alias, cbu
+     FROM usuarios
+     WHERE cbu = ? OR alias = ?
+     LIMIT 1`,
+    [destino, destino]
+  );
+
+  return rows[0] || null;
+};
+
+const ajustarSaldo = async (id, delta, conn = db) => {
+  await conn.execute(
+    "UPDATE usuarios SET saldo = saldo + ? WHERE id = ?",
+    [delta, id]
+  );
+};
+
 module.exports = {
   findByEmail,
   findById,
   createUser,
+  findByCbuOrAlias,
+  ajustarSaldo,
 };
