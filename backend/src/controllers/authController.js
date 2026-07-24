@@ -128,7 +128,44 @@ const login = async (req, res) => {
   }
 };
 
+const verificarPassword = async (req, res) => {
+  try {
+    const { contrasena } = req.body;
+
+    if (!contrasena) {
+      return res.status(400).json({
+        success: false,
+        message: "La contraseña es obligatoria.",
+      });
+    }
+
+    const usuario = await usuarioModel.findByEmail(req.usuario.email);
+
+    if (!usuario) {
+      return res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado.",
+      });
+    }
+
+    const valido = await bcrypt.compare(contrasena, usuario.contrasena);
+
+    return res.status(200).json({
+      success: true,
+      valido,
+    });
+  } catch (error) {
+    console.error("Error al verificar la contraseña:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Ocurrió un error al verificar la contraseña.",
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
+  verificarPassword,
 };
