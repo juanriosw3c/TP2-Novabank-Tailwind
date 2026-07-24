@@ -5,6 +5,7 @@ import { USERS, TRANSACTIONS } from "../data/mockData";
 const BankContext = createContext();
 
 const API_URL = "http://localhost:8888/api/auth";
+const API_BASE = "http://localhost:8888/api";
 
 const normalizeUser = (usuario) => ({
   ...usuario,
@@ -16,6 +17,49 @@ const normalizeUser = (usuario) => ({
   balance: Number(usuario.saldo ?? usuario.balance ?? 0),
   status: usuario.estado ?? usuario.status,
 });
+
+const normalizeCard = (tarjeta) => ({
+  id: tarjeta.id,
+  type: tarjeta.tipo,
+  number: tarjeta.numero,
+  holder: tarjeta.titular,
+  expires: tarjeta.vencimiento,
+  cvv: tarjeta.cvv,
+  frozen: Boolean(tarjeta.congelada),
+});
+
+const normalizeContact = (contacto) => ({
+  id: contacto.id,
+  name: contacto.nombre,
+  alias: contacto.alias,
+  cbu: contacto.cbu,
+  bank: contacto.banco,
+  reference: contacto.referencia,
+  isFavorite: Boolean(contacto.favorito),
+});
+
+const apiFetch = async (path, options = {}) => {
+  const token = localStorage.getItem("novabank_token");
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw Object.assign(new Error(data.message || "Ocurrió un error."), {
+      status: response.status,
+    });
+  }
+
+  return data;
+};
 
 export function BankProvider({ children }) {
   const [users, setUsers] = useState(() => {
@@ -82,6 +126,41 @@ export function BankProvider({ children }) {
     }
   }, [currentUser]);
 
+  // ================= CUENTA REAL (perfil, saldo, tarjetas, contactos) =================
+
+  const loadAccountData = async () => {
+    try {
+      const [perfilRes, tarjetasRes, contactosRes] = await Promise.all([
+        apiFetch("/usuarios/me"),
+        apiFetch("/tarjetas"),
+        apiFetch("/contactos"),
+      ]);
+
+      const user = normalizeUser(perfilRes.usuario);
+      user.cards = tarjetasRes.tarjetas.map(normalizeCard);
+      user.contacts = contactosRes.contactos.map(normalizeContact);
+
+      setCurrentUser(user);
+
+      return true;
+    } catch (error) {
+      console.error("Error al cargar los datos de la cuenta:", error);
+
+      if (error.status === 401) {
+        logout();
+      }
+
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (localStorage.getItem("novabank_token")) {
+      loadAccountData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ================= AUTENTICACIÓN =================
 
   const login = async (email, password) => {
@@ -110,6 +189,10 @@ export function BankProvider({ children }) {
 
       localStorage.setItem("novabank_token", data.token);
       setCurrentUser(user);
+
+      if (user.role === "cliente") {
+        await loadAccountData();
+      }
 
       return {
         success: true,
@@ -168,9 +251,35 @@ export function BankProvider({ children }) {
     }
   };
 
+  const verifyPassword = async (password) => {
+    try {
+      const data = await apiFetch("/auth/verificar-password", {
+        method: "POST",
+        body: JSON.stringify({ contrasena: password }),
+      });
+
+      return Boolean(data.valido);
+    } catch (error) {
+      console.error("Error al verificar la contraseña:", error);
+      return false;
+    }
+  };
+
   // ================= OPERACIONES BANCARIAS =================
 
-  const transfer = (destCbuOrAlias, amount, message = "") => {
+  const resolveRecipient = async (query) => {
+    try {
+      const data = await apiFetch(
+        `/usuarios/resolver?destino=${encodeURIComponent(query)}`
+      );
+
+      return data.destinatario;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const transfer = async (destCbuOrAlias, amount, message = "") => {
     if (!currentUser) {
       return {
         success: false,
@@ -178,93 +287,33 @@ export function BankProvider({ children }) {
       };
     }
 
-    const amountNum = Number(amount);
-    const target = destCbuOrAlias.trim().toLowerCase();
-
-    const receiver = users.find(
-      (user) =>
-        user.cbu === target ||
-        user.alias?.toLowerCase() === target
-    );
-
-    if (!receiver) {
-      return {
-        success: false,
-        error: "Destinatario no encontrado.",
-      };
-    }
-
-    if (currentUser.id === receiver.id) {
-      return {
-        success: false,
-        error: "No podés transferirte a vos mismo.",
-      };
-    }
-
-    if (currentUser.balance < amountNum) {
-      return {
-        success: false,
-        error: "Saldo insuficiente.",
-      };
-    }
-
-    setUsers((previousUsers) =>
-      previousUsers.map((user) => {
-        if (user.id === currentUser.id) {
-          return {
-            ...user,
-            balance: user.balance - amountNum,
-          };
-        }
-
-        if (user.id === receiver.id) {
-          return {
-            ...user,
-            balance: user.balance + amountNum,
-          };
-        }
-
-        return user;
-      })
-    );
-
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      balance: previousUser.balance - amountNum,
-    }));
-
-    const newTransaction = {
-      id: `t-${Date.now()}`,
-      userId: currentUser.id,
-      type: "transfer",
-      title: `Transferencia a ${receiver.name}`,
-      amount: `-$${amountNum.toLocaleString("es-AR")}`,
-      date:
-        "Hoy, " +
-        new Date().toLocaleTimeString("es-AR", {
-          hour: "2-digit",
-          minute: "2-digit",
+    try {
+      const data = await apiFetch("/transacciones/transferencia", {
+        method: "POST",
+        body: JSON.stringify({
+          destino: destCbuOrAlias.trim(),
+          monto: Number(amount),
+          mensaje: message.trim(),
         }),
-      icon: "transfer",
-      message: message.trim(),
-    };
+      });
 
-    setTransactions((previousTransactions) => [
-      newTransaction,
-      ...previousTransactions,
-    ]);
+      await loadAccountData();
 
-    return {
-      success: true,
-      recipient: receiver,
-    };
+      return {
+        success: true,
+        recipient: data.destinatario,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "No se pudo realizar la transferencia.",
+      };
+    }
   };
 
   // ================= INVERSIONES =================
 
-  const createInvestment = (type, amount) => {
-    const amountNum = Number(amount);
-
+  const createInvestment = async (type, amount) => {
     if (!currentUser) {
       return {
         success: false,
@@ -272,209 +321,146 @@ export function BankProvider({ children }) {
       };
     }
 
-    if (!type) {
+    try {
+      await apiFetch("/transacciones/inversion", {
+        method: "POST",
+        body: JSON.stringify({ tipo: type, monto: Number(amount) }),
+      });
+
+      await loadAccountData();
+
+      return {
+        success: true,
+      };
+    } catch (error) {
       return {
         success: false,
-        error: "Seleccioná un tipo de inversión.",
+        error: error.message || "No se pudo procesar la inversión.",
       };
     }
-
-    if (!amountNum || amountNum <= 0) {
-      return {
-        success: false,
-        error: "El monto debe ser mayor a cero.",
-      };
-    }
-
-    if (currentUser.balance < amountNum) {
-      return {
-        success: false,
-        error: "Saldo insuficiente.",
-      };
-    }
-
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              balance: user.balance - amountNum,
-            }
-          : user
-      )
-    );
-
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      balance: previousUser.balance - amountNum,
-    }));
-
-    const labels = {
-      "plazo-fijo": "Plazo fijo UVA",
-      "fondo-comun": "Fondo común de inversión",
-      "dolar-mep": "Dólar MEP",
-      acciones: "Acciones",
-    };
-
-    const newTransaction = {
-      id: `t-${Date.now()}`,
-      userId: currentUser.id,
-      type: "investment",
-      title: `Inversión: ${labels[type] || type}`,
-      amount: `-$${amountNum.toLocaleString("es-AR")}`,
-      date:
-        "Hoy, " +
-        new Date().toLocaleTimeString("es-AR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      icon: "investment",
-      message: "",
-    };
-
-    setTransactions((previousTransactions) => [
-      newTransaction,
-      ...previousTransactions,
-    ]);
-
-    return {
-      success: true,
-    };
   };
 
   // ================= TARJETAS =================
 
-  const updateClientCards = (clientId, newCards) => {
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === clientId
-          ? {
-              ...user,
-              cards: newCards,
-            }
-          : user
-      )
-    );
+  const createCard = async (type) => {
+    try {
+      await apiFetch("/tarjetas", {
+        method: "POST",
+        body: JSON.stringify({ tipo: type }),
+      });
 
-    if (currentUser?.id === clientId) {
-      setCurrentUser((previousUser) => ({
-        ...previousUser,
-        cards: newCards,
-      }));
+      await loadAccountData();
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "No se pudo crear la tarjeta.",
+      };
+    }
+  };
+
+  const freezeCard = async (cardId) => {
+    try {
+      await apiFetch(`/tarjetas/${cardId}`, { method: "PATCH" });
+      await loadAccountData();
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "No se pudo actualizar la tarjeta.",
+      };
+    }
+  };
+
+  const deleteCard = async (cardId) => {
+    try {
+      await apiFetch(`/tarjetas/${cardId}`, { method: "DELETE" });
+      await loadAccountData();
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "No se pudo eliminar la tarjeta.",
+      };
     }
   };
 
   // ================= CONTACTOS =================
 
-  const addContact = (contactData) => {
-    if (!currentUser) return;
+  const addContact = async (contactData) => {
+    if (!currentUser) {
+      return { success: false, error: "No hay usuario activo." };
+    }
 
-    const updatedContacts = [
-      ...(currentUser.contacts || []),
-      {
-        id: `contacto-${Date.now()}`,
-        ...contactData,
-        isFavorite: false,
-      },
-    ];
+    try {
+      await apiFetch("/contactos", {
+        method: "POST",
+        body: JSON.stringify({
+          nombre: contactData.name,
+          alias: contactData.alias,
+          cbu: contactData.cbu,
+          banco: contactData.bank,
+          referencia: contactData.reference,
+        }),
+      });
 
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              contacts: updatedContacts,
-            }
-          : user
-      )
-    );
+      await loadAccountData();
 
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      contacts: updatedContacts,
-    }));
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "No se pudo agregar el contacto.",
+      };
+    }
   };
 
-  const removeContact = (contactId) => {
+  const removeContact = async (contactId) => {
     if (!currentUser) return;
 
-    const updatedContacts = (currentUser.contacts || []).filter(
-      (contact) => contact.id !== contactId
-    );
-
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              contacts: updatedContacts,
-            }
-          : user
-      )
-    );
-
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      contacts: updatedContacts,
-    }));
+    try {
+      await apiFetch(`/contactos/${contactId}`, { method: "DELETE" });
+      await loadAccountData();
+    } catch (error) {
+      console.error("Error al eliminar contacto:", error);
+    }
   };
 
-  const toggleFavoriteContact = (contactId) => {
+  const toggleFavoriteContact = async (contactId) => {
     if (!currentUser) return;
 
-    const updatedContacts = (currentUser.contacts || []).map((contact) =>
-      contact.id === contactId
-        ? {
-            ...contact,
-            isFavorite: !contact.isFavorite,
-          }
-        : contact
+    const contact = (currentUser.contacts || []).find(
+      (item) => item.id === contactId
     );
 
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              contacts: updatedContacts,
-            }
-          : user
-      )
-    );
+    if (!contact) return;
 
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      contacts: updatedContacts,
-    }));
+    try {
+      await apiFetch(`/contactos/${contactId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ favorito: !contact.isFavorite }),
+      });
+      await loadAccountData();
+    } catch (error) {
+      console.error("Error al actualizar contacto:", error);
+    }
   };
 
-  const updateContactReference = (contactId, reference) => {
+  const updateContactReference = async (contactId, reference) => {
     if (!currentUser) return;
 
-    const updatedContacts = (currentUser.contacts || []).map((contact) =>
-      contact.id === contactId
-        ? {
-            ...contact,
-            reference,
-          }
-        : contact
-    );
-
-    setUsers((previousUsers) =>
-      previousUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              contacts: updatedContacts,
-            }
-          : user
-      )
-    );
-
-    setCurrentUser((previousUser) => ({
-      ...previousUser,
-      contacts: updatedContacts,
-    }));
+    try {
+      await apiFetch(`/contactos/${contactId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ referencia: reference }),
+      });
+      await loadAccountData();
+    } catch (error) {
+      console.error("Error al actualizar contacto:", error);
+    }
   };
 
   // ================= PERFIL =================
@@ -532,9 +518,13 @@ export function BankProvider({ children }) {
         login,
         logout,
         register,
+        verifyPassword,
+        resolveRecipient,
         transfer,
         createInvestment,
-        updateClientCards,
+        createCard,
+        freezeCard,
+        deleteCard,
         addContact,
         removeContact,
         toggleFavoriteContact,
