@@ -8,7 +8,7 @@ import { useBank } from "../../context/BankContext";
 import ProfileModal from "../../components/Dashboard/ProfileModal";
 
 function TarjetasCliente() {
-  const { currentUser, updateClientCards, logout } = useBank();
+  const { currentUser, createCard, freezeCard, deleteCard, verifyPassword, logout } = useBank();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -16,18 +16,11 @@ function TarjetasCliente() {
   const client = currentUser || {
     id: "cliente-1",
     name: "Federico García",
-    password: "cliente123",
     initials: "FG",
     cards: []
   };
 
   const cards = client.cards || [];
-
-  const setCards = (newCards) => {
-    // Si se pasa una función updater (como setCards(prev => ...))
-    const resolvedCards = typeof newCards === "function" ? newCards(cards) : newCards;
-    updateClientCards(client.id, resolvedCards);
-  };
 
   const handleLogout = () => {
     logout();
@@ -90,9 +83,10 @@ function TarjetasCliente() {
 
         <CardSummary
           cards={cards}
-          setCards={setCards}
-          clientPassword={client.password}
-          cardHolder={client.name}
+          onCreateCard={createCard}
+          onFreezeCard={freezeCard}
+          onDeleteCard={deleteCard}
+          onVerifyPassword={verifyPassword}
         />
       </section>
 

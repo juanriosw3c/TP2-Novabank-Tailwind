@@ -15,7 +15,7 @@ const initialDraft = {
 
 function TransferModal({ isOpen, onClose, recipient }) {
   const navigate = useNavigate();
-  const { currentUser, users, transfer, addContact } = useBank();
+  const { currentUser, transfer, addContact, resolveRecipient, verifyPassword } = useBank();
 
   const [step, setStep] = useState("search");
   const [draft, setDraft] = useState(initialDraft);
@@ -24,7 +24,6 @@ function TransferModal({ isOpen, onClose, recipient }) {
   const client = currentUser || {
     id: "",
     balance: 0,
-    password: "",
   };
 
   useEffect(() => {
@@ -60,65 +59,55 @@ function TransferModal({ isOpen, onClose, recipient }) {
       minimumFractionDigits: 2,
     });
 
-  const handleSearchRecipient = () => {
-  const normalized = draft.query.trim().toLowerCase();
+  const handleSearchRecipient = async () => {
+    const normalized = draft.query.trim();
 
-  if (!normalized) {
-    setError("Ingrese un valor para buscar.");
-    return;
-  }
+    if (!normalized) {
+      setError("Ingrese un valor para buscar.");
+      return;
+    }
 
-  const searchedCbu = normalized.replace(/\D/g, "");
+    const foundUser = await resolveRecipient(normalized);
 
-  const foundUser = users.find((u) => {
-    const userAlias = String(u.alias || "").toLowerCase();
-    const userCbu = String(u.cbu || "").replace(/\D/g, "");
+    if (!foundUser) {
+      setError("No se encontró ninguna cuenta con ese CBU, CVU o alias.");
+      return;
+    }
 
-    return (
-      u.role === "client" &&
-      u.id !== client.id &&
-      (
-        (normalized && userAlias === normalized) ||
-        (searchedCbu && userCbu === searchedCbu)
-      )
-    );
-  });
+    setDraft((current) => ({
+      ...current,
+      recipient: {
+        name: foundUser.nombre,
+        alias: foundUser.alias,
+        cbu: foundUser.cbu,
+        bank: "NovaBank",
+      },
+      reference: foundUser.nombre,
+    }));
 
-  if (!foundUser) {
-    setError("No se encontró ninguna cuenta con ese CBU, CVU o alias.");
-    return;
-  }
+    setError("");
+    setStep("verify");
+  };
 
-  setDraft((current) => ({
-    ...current,
-    recipient: {
-      id: foundUser.id,
-      name: foundUser.name,
-      alias: foundUser.alias,
-      cbu: foundUser.cbu,
-      bank: "NovaBank",
-    },
-    reference: foundUser.name,
-  }));
-
-  setError("");
-  setStep("verify");
-};
-
-  const confirmRecipient = () => {
+  const confirmRecipient = async () => {
     if (!draft.recipient) {
       setError("No hay destinatario seleccionado.");
       return;
     }
 
     if (draft.addContact) {
-      addContact({
+      const result = await addContact({
         name: draft.recipient.name,
         alias: draft.recipient.alias,
         cbu: draft.recipient.cbu,
         bank: draft.recipient.bank,
         reference: draft.reference || draft.recipient.name,
       });
+
+      if (!result.success) {
+        setError(result.error || "No se pudo agendar el contacto.");
+        return;
+      }
     }
 
     setError("");
@@ -142,18 +131,20 @@ function TransferModal({ isOpen, onClose, recipient }) {
     setStep("message");
   };
 
-  const finishTransfer = () => {
+  const finishTransfer = async () => {
     if (!draft.recipient) {
       setError("No hay destinatario seleccionado.");
       return;
     }
 
-    if (draft.password !== client.password) {
+    const passwordValida = await verifyPassword(draft.password);
+
+    if (!passwordValida) {
       setError("La contraseña ingresada es incorrecta.");
       return;
     }
 
-    const result = transfer(
+    const result = await transfer(
       draft.recipient.cbu || draft.recipient.alias,
       Number(draft.amount),
       draft.message.trim()

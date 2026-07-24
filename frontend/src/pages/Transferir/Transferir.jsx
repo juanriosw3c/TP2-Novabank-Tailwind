@@ -65,19 +65,19 @@ function Transferir() {
     setSelectedContact(null);
   };
 
-  const handleReferenceEdit = (contact) => {
+  const handleReferenceEdit = async (contact) => {
     const nextReference = window.prompt("Nueva referencia o apodo", contact.reference || contact.name);
 
     if (nextReference && nextReference.trim()) {
-      updateContactReference(contact.id, nextReference.trim());
+      await updateContactReference(contact.id, nextReference.trim());
     }
   };
 
-  const handleDelete = (contact) => {
+  const handleDelete = async (contact) => {
     const shouldDelete = window.confirm(`¿Eliminar a ${contact.reference || contact.name} de tus contactos?`);
 
     if (shouldDelete) {
-      removeContact(contact.id);
+      await removeContact(contact.id);
     }
   };
 

@@ -7,7 +7,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
+function CardSummary({ cards, onCreateCard, onFreezeCard, onDeleteCard, onVerifyPassword }) {
   const [visibleNumbers, setVisibleNumbers] = useState({});
   const [visibleCvvs, setVisibleCvvs] = useState({});
   const [cvvPassword, setCvvPassword] = useState("");
@@ -21,19 +21,6 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
   const [newCardType, setNewCardType] = useState("debito");
 
   const formatNumber = (number) => number.replace(/(.{4})/g, "$1 ").trim();
-
-  const generateDigits = (length) =>
-    Array.from({ length }, () => Math.floor(Math.random() * 10)).join("");
-
-  const generateUniqueValue = (length, usedValues, prefix = "") => {
-    let value = `${prefix}${generateDigits(length - prefix.length)}`;
-
-    while (usedValues.has(value)) {
-      value = `${prefix}${generateDigits(length - prefix.length)}`;
-    }
-
-    return value;
-  };
 
   const toggleNumber = (cardId) => {
     setVisibleNumbers((prev) => ({
@@ -55,8 +42,10 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
     }));
   };
 
-  const verifyPassword = () => {
-    if (cvvPassword === clientPassword) {
+  const handleVerifyCvvPassword = async () => {
+    const valida = await onVerifyPassword(cvvPassword);
+
+    if (valida) {
       setVisibleCvvs((prev) => ({
         ...prev,
         [selectedCard]: true,
@@ -75,22 +64,20 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
     setShowFreezeModal(true);
   };
 
-  const confirmFreeze = () => {
-    if (freezePassword !== clientPassword) {
+  const confirmFreeze = async () => {
+    const valida = await onVerifyPassword(freezePassword);
+
+    if (!valida) {
       alert("Contraseña incorrecta.");
       return;
     }
 
-    setCards((prevCards) =>
-      prevCards.map((card) =>
-        card.id === selectedCard
-          ? {
-              ...card,
-              frozen: !card.frozen,
-            }
-          : card
-      )
-    );
+    const result = await onFreezeCard(selectedCard);
+
+    if (!result.success) {
+      alert(result.error || "No se pudo actualizar la tarjeta.");
+      return;
+    }
 
     setShowFreezeModal(false);
     setFreezePassword("");
@@ -102,13 +89,21 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
     setShowDeleteModal(true);
   };
 
-  const confirmDelete = () => {
-    if (deletePassword !== clientPassword) {
+  const confirmDelete = async () => {
+    const valida = await onVerifyPassword(deletePassword);
+
+    if (!valida) {
       alert("Contraseña incorrecta.");
       return;
     }
 
-    setCards((prevCards) => prevCards.filter((card) => card.id !== selectedCard));
+    const result = await onDeleteCard(selectedCard);
+
+    if (!result.success) {
+      alert(result.error || "No se pudo eliminar la tarjeta.");
+      return;
+    }
+
     setVisibleNumbers((prev) => ({
       ...prev,
       [selectedCard]: false,
@@ -121,29 +116,13 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
     setDeletePassword("");
   };
 
-  const requestNewCard = () => {
-    const usedNumbers = new Set(cards.map((card) => card.number));
-    const usedCvvs = new Set(cards.map((card) => card.cvv));
-    const isCredit = newCardType === "credito";
-    const numberPrefix = isCredit ? "5364" : "4509";
-    const newNumber = generateUniqueValue(16, usedNumbers, numberPrefix);
-    const newCvv = generateUniqueValue(3, usedCvvs);
-    const today = new Date();
-    const expirationYear = String(today.getFullYear() + 4).slice(-2);
-    const expirationMonth = String(today.getMonth() + 1).padStart(2, "0");
+  const requestNewCard = async () => {
+    const result = await onCreateCard(newCardType);
 
-    setCards((prevCards) => [
-      ...prevCards,
-      {
-        id: Date.now(),
-        type: isCredit ? "Crédito NovaBank" : "Débito NovaBank",
-        number: newNumber,
-        holder: cardHolder,
-        expires: `${expirationMonth}/${expirationYear}`,
-        cvv: newCvv,
-        frozen: false,
-      },
-    ]);
+    if (!result.success) {
+      alert(result.error || "No se pudo crear la tarjeta.");
+      return;
+    }
 
     setVisibleNumbers({});
     setVisibleCvvs({});
@@ -287,7 +266,7 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
               className="w-full p-3 rounded-xl border border-violet-500/35 bg-white/5 text-white text-sm focus:outline-none focus:border-violet-500"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  verifyPassword();
+                  handleVerifyCvvPassword();
                 }
               }}
             />
@@ -306,10 +285,10 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
                 Cancelar
               </button>
 
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="bg-violet-600 text-white rounded-lg py-2 px-4 cursor-pointer font-bold text-sm hover:bg-violet-500 transition-all"
-                onClick={verifyPassword}
+                onClick={handleVerifyCvvPassword}
               >
                 Ver CVV
               </button>
