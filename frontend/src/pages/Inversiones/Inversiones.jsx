@@ -19,10 +19,10 @@ function ModalNuevaInversion({ onClose, onConfirmar }) {
   const [error, setError] = useState("")
   const [exito, setExito] = useState(false)   // 👈 nuevo estado
 
-  function handleConfirmar(e) {
+  async function handleConfirmar(e) {
     e.preventDefault()
     if (!tipo || !monto) return
-    const result = onConfirmar(tipo, monto)
+    const result = await onConfirmar(tipo, monto)
     if (!result.success) {
       setError(result.error)
       return

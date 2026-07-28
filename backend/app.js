@@ -4,12 +4,14 @@ const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const authRoutes = require("./src/routes/authRoutes");
+const bankingRoutes = require("./src/routes/bankingRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 8888;
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
+app.use("/api", bankingRoutes);
 app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (req, res) => {

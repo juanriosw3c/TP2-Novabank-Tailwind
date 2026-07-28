@@ -128,7 +128,25 @@ const login = async (req, res) => {
   }
 };
 
+const verifyPassword = async (req, res) => {
+  try {
+    const { contrasena } = req.body;
+    if (!contrasena) {
+      return res.status(400).json({ success: false, message: "La contrasena es obligatoria." });
+    }
+    const usuario = await usuarioModel.findWithPasswordById(req.usuario.id);
+    const validPassword = usuario && await bcrypt.compare(contrasena, usuario.contrasena);
+    if (!validPassword) {
+      return res.status(401).json({ success: false, message: "Contrasena incorrecta." });
+    }
+    return res.json({ success: true });
+  } catch {
+    return res.status(500).json({ success: false, message: "No se pudo verificar la contrasena." });
+  }
+};
+
 module.exports = {
   register,
   login,
+  verifyPassword,
 };

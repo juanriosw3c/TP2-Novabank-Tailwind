@@ -20,7 +20,7 @@ const DESTINOS = [
 ]
 
 function ComprarDolar() {
-  const { currentUser } = useBank();
+  const { currentUser, buyDollars } = useBank();
   const [tipoSeleccionado, setTipoSeleccionado] = useState("oficial")
   const [montoARS, setMontoARS] = useState("")
   const [destino, setDestino] = useState("caja")
@@ -35,6 +35,16 @@ function ComprarDolar() {
       : "0,00"
 
   const montoValido = montoNumerico > 0 && montoNumerico <= SALDO_ARS
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+
+  const handleComprar = async () => {
+    setError("")
+    const result = await buyDollars(montoNumerico, cotizacion.precio, tipoSeleccionado, destino)
+    if (!result.success) return setError(result.error)
+    setSuccess("Compra realizada correctamente.")
+    setMontoARS("")
+  }
 
   return (
     <div className="min-h-dvh w-full bg-[#070713] text-white">
@@ -237,12 +247,15 @@ function ComprarDolar() {
         {/* CTA */}
         <button
           type="button"
+          onClick={handleComprar}
           disabled={!montoValido}
           className="w-full py-4 rounded-2xl bg-white text-[#070713] font-bold text-sm flex items-center justify-center gap-2 transition-all hover:bg-gray-100 active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <Lock size={14} strokeWidth={2.5} />
           Confirmá el monto para continuar
         </button>
+        {error && <p className="mt-3 text-center text-sm text-red-400">{error}</p>}
+        {success && <p className="mt-3 text-center text-sm text-emerald-400">{success}</p>}
       </div>
 
       {/* FOOTER */}

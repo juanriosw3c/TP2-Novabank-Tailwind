@@ -8,7 +8,7 @@ import { useBank } from "../../context/BankContext";
 import ProfileModal from "../../components/Dashboard/ProfileModal";
 
 function TarjetasCliente() {
-  const { currentUser, updateClientCards, logout } = useBank();
+  const { currentUser, updateClientCards, logout, requestCard } = useBank();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -93,6 +93,7 @@ function TarjetasCliente() {
           setCards={setCards}
           clientPassword={client.password}
           cardHolder={client.name}
+          requestCard={requestCard}
         />
       </section>
 

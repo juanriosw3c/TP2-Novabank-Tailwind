@@ -7,7 +7,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
+function CardSummary({ cards, setCards, clientPassword, cardHolder, requestCard }) {
   const [visibleNumbers, setVisibleNumbers] = useState({});
   const [visibleCvvs, setVisibleCvvs] = useState({});
   const [cvvPassword, setCvvPassword] = useState("");
@@ -121,7 +121,14 @@ function CardSummary({ cards, setCards, clientPassword, cardHolder }) {
     setDeletePassword("");
   };
 
-  const requestNewCard = () => {
+  const requestNewCard = async () => {
+    if (requestCard) {
+      const result = await requestCard(newCardType, cardHolder);
+      if (!result.success) return alert(result.error || "No se pudo solicitar la tarjeta.");
+      setShowRequestModal(false);
+      setNewCardType("debito");
+      return;
+    }
     const usedNumbers = new Set(cards.map((card) => card.number));
     const usedCvvs = new Set(cards.map((card) => card.cvv));
     const isCredit = newCardType === "credito";

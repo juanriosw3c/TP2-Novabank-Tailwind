@@ -15,7 +15,7 @@ const initialDraft = {
 
 function TransferModal({ isOpen, onClose, recipient }) {
   const navigate = useNavigate();
-  const { currentUser, users, transfer, addContact } = useBank();
+  const { currentUser, users, transfer, addContact, resolveRecipient } = useBank();
 
   const [step, setStep] = useState("search");
   const [draft, setDraft] = useState(initialDraft);
@@ -60,13 +60,32 @@ function TransferModal({ isOpen, onClose, recipient }) {
       minimumFractionDigits: 2,
     });
 
-  const handleSearchRecipient = () => {
+  const handleSearchRecipient = async () => {
   const normalized = draft.query.trim().toLowerCase();
 
   if (!normalized) {
     setError("Ingrese un valor para buscar.");
     return;
   }
+
+  const apiResult = await resolveRecipient(normalized);
+  if (!apiResult.success) {
+    setError(apiResult.error);
+    return;
+  }
+  const apiRecipient = apiResult.recipient;
+  if (Number(apiRecipient.id) === Number(client.id)) {
+    setError("No podes transferirte a vos mismo.");
+    return;
+  }
+  setDraft((current) => ({
+    ...current,
+    recipient: { id: apiRecipient.id, name: apiRecipient.nombre, alias: apiRecipient.alias, cbu: apiRecipient.cbu, bank: "NovaBank" },
+    reference: apiRecipient.nombre,
+  }));
+  setError("");
+  setStep("verify");
+  return;
 
   const searchedCbu = normalized.replace(/\D/g, "");
 
@@ -142,18 +161,18 @@ function TransferModal({ isOpen, onClose, recipient }) {
     setStep("message");
   };
 
-  const finishTransfer = () => {
+  const finishTransfer = async () => {
     if (!draft.recipient) {
       setError("No hay destinatario seleccionado.");
       return;
     }
 
-    if (draft.password !== client.password) {
+    if (client.password && draft.password !== client.password) {
       setError("La contraseña ingresada es incorrecta.");
       return;
     }
 
-    const result = transfer(
+    const result = await transfer(
       draft.recipient.cbu || draft.recipient.alias,
       Number(draft.amount),
       draft.message.trim()

@@ -4,7 +4,22 @@ import { USERS, TRANSACTIONS } from "../data/mockData";
 
 const BankContext = createContext();
 
-const API_URL = "http://localhost:8888/api/auth";
+const API_URL = "http://localhost:8888/api";
+
+const apiRequest = async (path, options = {}) => {
+  const token = localStorage.getItem("novabank_token");
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.message || "No se pudo completar la operacion.");
+  return payload.data;
+};
 
 const normalizeUser = (usuario) => ({
   ...usuario,
@@ -82,11 +97,43 @@ export function BankProvider({ children }) {
     }
   }, [currentUser]);
 
+  const loadMovements = async (userId = currentUser?.id) => {
+    if (!userId) return [];
+    const rows = await apiRequest("/movimientos");
+    const normalized = rows.map((movement) => ({
+      id: movement.id,
+      userId,
+      type: movement.tipo,
+      title: movement.titulo,
+      amount: `${movement.tipo === "income" ? "+" : "-"}$${Number(movement.monto).toLocaleString("es-AR")}`,
+      date: new Date(movement.fecha).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }),
+      icon: movement.icono,
+    }));
+    setTransactions(normalized);
+    return normalized;
+  };
+
+  const loadCards = async () => {
+    const rows = await apiRequest("/tarjetas");
+    const cards = rows.map((card) => ({ id: card.id, type: card.tipo, number: card.numero, holder: card.titular, expires: card.vencimiento, frozen: Boolean(card.congelada) }));
+    setCurrentUser((previousUser) => previousUser ? { ...previousUser, cards } : previousUser);
+    return cards;
+  };
+
+  const resolveRecipient = async (destination) => {
+    try {
+      const recipient = await apiRequest(`/usuarios/resolver?destino=${encodeURIComponent(destination)}`);
+      return { success: true, recipient };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
   // ================= AUTENTICACIÓN =================
 
   const login = async (email, password) => {
     try {
-      const response = await fetch(`${API_URL}/login`, {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -110,6 +157,8 @@ export function BankProvider({ children }) {
 
       localStorage.setItem("novabank_token", data.token);
       setCurrentUser(user);
+      await loadMovements(user.id);
+      await loadCards();
 
       return {
         success: true,
@@ -133,7 +182,7 @@ export function BankProvider({ children }) {
 
   const register = async ({ name, email, dni, password }) => {
     try {
-      const response = await fetch(`${API_URL}/register`, {
+      const response = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -170,7 +219,16 @@ export function BankProvider({ children }) {
 
   // ================= OPERACIONES BANCARIAS =================
 
-  const transfer = (destCbuOrAlias, amount, message = "") => {
+  const transfer = async (destCbuOrAlias, amount, message = "") => {
+    try {
+      const data = await apiRequest("/transferencias", { method: "POST", body: JSON.stringify({ destination: destCbuOrAlias, amount, message }) });
+      setCurrentUser((user) => user ? { ...user, balance: user.balance - Number(amount) } : user);
+      await loadMovements();
+      return { success: true, recipient: data.recipient };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+    /* Datos locales conservados debajo como referencia del trabajo previo. */
     if (!currentUser) {
       return {
         success: false,
@@ -262,7 +320,16 @@ export function BankProvider({ children }) {
 
   // ================= INVERSIONES =================
 
-  const createInvestment = (type, amount) => {
+  const createInvestment = async (type, amount) => {
+    try {
+      await apiRequest("/inversiones", { method: "POST", body: JSON.stringify({ type, amount }) });
+      setCurrentUser((user) => user ? { ...user, balance: user.balance - Number(amount) } : user);
+      await loadMovements();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+    /* Datos locales conservados debajo como referencia del trabajo previo. */
     const amountNum = Number(amount);
 
     if (!currentUser) {
@@ -523,6 +590,20 @@ export function BankProvider({ children }) {
     });
   };
 
+  const buyDollars = async (amount, rate, currencyType, destination) => {
+    try {
+      await apiRequest("/comprar-dolares", { method: "POST", body: JSON.stringify({ amount, rate, currencyType, destination }) });
+      setCurrentUser((user) => user ? { ...user, balance: user.balance - Number(amount) } : user);
+      await loadMovements();
+      return { success: true };
+    } catch (error) { return { success: false, error: error.message }; }
+  };
+
+  const requestCard = async (type, holder) => {
+    try { await apiRequest("/tarjetas", { method: "POST", body: JSON.stringify({ type, holder }) }); await loadCards(); return { success: true }; }
+    catch (error) { return { success: false, error: error.message }; }
+  };
+
   return (
     <BankContext.Provider
       value={{
@@ -534,6 +615,11 @@ export function BankProvider({ children }) {
         register,
         transfer,
         createInvestment,
+        buyDollars,
+        loadMovements,
+        loadCards,
+        requestCard,
+        resolveRecipient,
         updateClientCards,
         addContact,
         removeContact,

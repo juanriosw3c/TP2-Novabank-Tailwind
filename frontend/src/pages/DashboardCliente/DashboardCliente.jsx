@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye } from "lucide-react";
 import { useBank } from "../../context/BankContext";
 
@@ -11,7 +11,7 @@ import Sidebar from "../../components/Dashboard/Sidebar";
 import { dashboardData } from "../../data/mockData";
 
 function DashboardCliente() {
-  const { currentUser, transactions } = useBank();
+  const { currentUser, transactions, loadMovements } = useBank();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Usuario activo o fallback por si recargan la página
@@ -22,6 +22,10 @@ function DashboardCliente() {
     status: "Cuenta activa",
     balance: 1248370.50,
   };
+
+  useEffect(() => {
+    if (currentUser) loadMovements().catch(() => {});
+  }, []);
 
   // Filtrar los movimientos que le pertenecen a este usuario
   const movements = transactions.filter(t => t.userId === client.id);

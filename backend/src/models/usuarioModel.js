@@ -43,8 +43,17 @@ const createUser = async ({ nombre, email, contrasena, dni }) => {
   return await findById(result.insertId);
 };
 
+const findWithPasswordById = async (id) => {
+  const [rows] = await db.execute(
+    "SELECT id, contrasena FROM usuarios WHERE id = ? LIMIT 1",
+    [id]
+  );
+  return rows[0] || null;
+};
+
 module.exports = {
   findByEmail,
   findById,
   createUser,
+  findWithPasswordById,
 };
